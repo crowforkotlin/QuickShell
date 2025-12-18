@@ -6,9 +6,10 @@
 
 ```text
 .
-├── README.md                 # 说明文档
-├── init_shizuku.sh           # Termux 内配置 Shizuku 环境脚本
+├── init_light.sh           # android 内配置 息屏命令脚本 环境脚本
+├── init_shizuku.sh           # Shizuku 环境脚本
 ├── init_zsh.sh               # 跨平台 Zsh 一键配置脚本
+├── README.md                 # 说明文档
 ├── rish_shizuku.dex          # Shizuku 运行核心文件 (init_shizuku.sh 依赖)
 ├── termux-init               # Termux 初始化与安装工具
 │   ├── init_termux.sh        # 推送到 Termux 执行的初始化逻辑

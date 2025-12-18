@@ -18,35 +18,50 @@ OS_TYPE=$(uname -o 2>/dev/null || uname -s)
 INSTALL_CMD=""
 UPDATE_CMD=""
 SUDO=""
+# 默认安装包列表 (Linux/Android 通用)
+PACKAGES="zsh curl git lsd bat fzf"
 
 detect_pm_linux_mac() {
     echo -e "${BLUE}检测到 Linux/Mac 环境，请选择包管理器：${NC}"
     echo "1) pkg (Termux)"
     echo "2) apt (Debian/Ubuntu/Kali)"
-    echo "3) choco (Linux?)"
-    echo "4) pacman (Arch/Manjaro)"
-    echo "5) brew (macOS/Linux)"
+    echo "3) pacman (Arch/Manjaro)"
+    echo "4) brew (macOS/Linux)"
+    echo "5) dnf/yum (Fedora/CentOS)"
     read -p "请输入选项 [1-5]: " pm_choice
     case $pm_choice in
         1) INSTALL_CMD="pkg install -y"; UPDATE_CMD="pkg update -y";;
         2) INSTALL_CMD="apt install -y"; UPDATE_CMD="apt update -y"; SUDO="sudo";;
-        3) INSTALL_CMD="choco install -y"; UPDATE_CMD="choco upgrade all -y";;
-        4) INSTALL_CMD="pacman -S --noconfirm"; UPDATE_CMD="pacman -Sy"; SUDO="sudo";;
-        5) INSTALL_CMD="brew install"; UPDATE_CMD="brew update";;
+        3) INSTALL_CMD="pacman -S --noconfirm"; UPDATE_CMD="pacman -Sy"; SUDO="sudo";;
+        4) INSTALL_CMD="brew install"; UPDATE_CMD="brew update";;
+        5) INSTALL_CMD="dnf install -y"; UPDATE_CMD="dnf update -y"; SUDO="sudo";;
         *) echo "无效，默认 apt"; INSTALL_CMD="apt install -y"; UPDATE_CMD="apt update -y"; SUDO="sudo";;
     esac
 }
 
 detect_pm_windows() {
-    echo -e "${BLUE}检测到 Windows 环境，请选择包管理器：${NC}"
-    echo "1) choco"
-    echo "2) pacman (MSYS2)"
-    read -p "请输入选项 [1-2]: " pm_choice
-    case $pm_choice in
-        1) INSTALL_CMD="choco install -y"; UPDATE_CMD="choco upgrade all -y";;
-        2) INSTALL_CMD="pacman -S --noconfirm"; UPDATE_CMD="pacman -Sy";;
-        *) echo "无效，默认 choco"; INSTALL_CMD="choco install -y"; UPDATE_CMD="choco upgrade all -y";;
-    esac
+    echo -e "${BLUE}检测到 Windows 环境 (MinGW/MSYS/Cygwin)...${NC}"
+    
+    # 检查 pacman 是否存在
+    if command -v pacman > /dev/null 2>&1; then
+        echo -e "${GREEN}-> 检测到 MSYS2 (pacman)，准备安装...${NC}"
+        INSTALL_CMD="pacman -S --noconfirm"
+        UPDATE_CMD="pacman -Sy"
+        
+        # --- 核心修改：Windows 下使用带前缀的包名 ---
+        # zsh, curl, git 通常在 msys 仓库，无需前缀
+        # lsd, bat, fzf 在 mingw64 仓库，需要前缀
+        PACKAGES="zsh curl git mingw-w64-x86_64-lsd mingw-w64-x86_64-bat mingw-w64-x86_64-fzf"
+        
+    else
+        echo -e "${RED}错误：未检测到 pacman 包管理器！${NC}"
+        echo -e "${YELLOW}Windows 环境下本脚本依赖 MSYS2 环境。${NC}"
+        echo -e "请前往以下地址下载并安装 MSYS2："
+        echo -e "${BLUE}https://github.com/msys2/msys2-installer/releases${NC}"
+        echo -e "注意：安装后请将 MSYS2 的 bin 目录添加到系统环境变量 PATH 中。"
+        echo -e "${RED}脚本已退出。${NC}"
+        exit 1
+    fi
 }
 
 # --- 开始 OS 检测 ---
@@ -55,6 +70,8 @@ case "$OS_TYPE" in
         echo -e "${GREEN}-> 检测到 Android 系统 (Termux)${NC}"
         INSTALL_CMD="pkg install -y"
         UPDATE_CMD="pkg update -y"
+        # Termux 下包名是标准的
+        PACKAGES="zsh curl git lsd bat fzf"
         ;;
     *Msys*|*Cygwin*|*Mingw*|*Windows*)
         detect_pm_windows
@@ -67,33 +84,33 @@ esac
 # ==========================================
 # 1. 安装基础软件
 # ==========================================
-echo -e "${GREEN}-> 正在更新源并安装 zsh, git, curl, lsd, bat, fzf...${NC}"
+echo -e "${GREEN}-> 正在更新源并安装必要软件...${NC}"
+echo -e "安装列表: ${BLUE}$PACKAGES${NC}"
 
 # 执行更新
 eval "$SUDO $UPDATE_CMD"
 
 # 执行安装
-echo -e "执行安装命令: $SUDO $INSTALL_CMD zsh curl git lsd bat fzf"
-eval "$SUDO $INSTALL_CMD zsh curl git lsd bat fzf"
+# 使用 $PACKAGES 变量替代硬编码
+eval "$SUDO $INSTALL_CMD $PACKAGES"
 
-# --- 修复点 1: 刷新命令缓存 ---
-# 防止刚安装完 zsh，shell 缓存里还认为没有 zsh
+# --- 刷新命令缓存 ---
 hash -r 2>/dev/null
 
-# 特殊处理：Ubuntu 下 bat 可能叫 batcat
-# --- 修复点 2: 兼容性写法 ---
-if command -v batcat > /dev/null 2>&1 && ! command -v bat > /dev/null 2>&1; then
-    echo "检测到 batcat，创建 bat 别名目录..."
-    mkdir -p ~/.local/bin
-    ln -s $(which batcat) ~/.local/bin/bat
-    export PATH=$HOME/.local/bin:$PATH
+# 特殊处理：Ubuntu 下 bat 可能叫 batcat (仅 Linux 需要检测)
+if [[ "$OS_TYPE" != *"Msys"* ]] && [[ "$OS_TYPE" != *"Mingw"* ]]; then
+    if command -v batcat > /dev/null 2>&1 && ! command -v bat > /dev/null 2>&1; then
+        echo "检测到 batcat，创建 bat 别名目录..."
+        mkdir -p ~/.local/bin
+        ln -s $(which batcat) ~/.local/bin/bat
+        export PATH=$HOME/.local/bin:$PATH
+    fi
 fi
 
 # 检查 Zsh 是否安装成功
-# --- 修复点 3: 使用 > /dev/null 2>&1 替代 &>，兼容 dash ---
 if ! command -v zsh > /dev/null 2>&1; then
     echo -e "${RED}错误：Zsh 安装失败！${NC}"
-    echo "调试信息: 尝试手动运行 'zsh --version' 查看是否安装。"
+    echo "调试信息: 尝试手动运行 'zsh --version' 查看是否安装成功。"
     exit 1
 fi
 
@@ -149,7 +166,7 @@ alias la='lsd -a'
 # Quick Shell 自动加载
 QS_DIR="${TARGET_DIR}"
 if [ -d "\$QS_DIR" ]; then
-    for script in "\$QS_DIR"/*; do
+    for script in "\$QS_DIR"/*(N); do
         if [ -f "\$script" ]; then
             filename=\$(basename "\$script")
             alias_name="\${filename%.*}"
@@ -198,7 +215,6 @@ echo -e "${GREEN}-> 设置默认 Shell...${NC}"
 if [[ "$OS_TYPE" == *"Android"* ]]; then
     chsh -s zsh
 else
-    # Linux 上尝试自动切换，如果失败提示手动
     if which zsh > /dev/null 2>&1; then
         chsh -s $(which zsh) || echo -e "${YELLOW}提示：可能需要手动输入密码或运行: chsh -s $(which zsh)${NC}"
     fi
