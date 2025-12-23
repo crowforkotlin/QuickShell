@@ -1,169 +1,223 @@
 #!/bin/bash
 
-# 定义颜色
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# ==============================================================================
+# Script Name: Zsh + OMZ + QuickShell Automated Deployment
+# Platform   : Windows (MSYS2/Git Bash), Linux, macOS, Android (Termux)
+# ==============================================================================
 
-echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}   Zsh + OMZ + QuickShell 配置脚本    ${NC}"
-echo -e "${YELLOW}========================================${NC}"
+# --- 1. Global Config & Utility Functions ---
+# Color Definitions (Fixed for Git Bash/Windows)
+# 使用 $'... ' 语法，强制 Shell 解析转义字符
+if command -v tput >/dev/null 2>&1; then
+    # 如果系统有 tput，优先使用 tput (更安全)
+    RED=$(tput setaf 1; tput bold)
+    GREEN=$(tput setaf 2; tput bold)
+    YELLOW=$(tput setaf 3; tput bold)
+    BLUE=$(tput setaf 4; tput bold)
+    MAGENTA=$(tput setaf 5; tput bold)
+    CYAN=$(tput setaf 6; tput bold)
+    WHITE=$(tput setaf 7; tput bold)
+    NC=$(tput sgr0)
+else
+    # 备用方案：通用 printf 写法
+    RED=$(printf '\033[1;31m')
+    GREEN=$(printf '\033[1;32m')
+    YELLOW=$(printf '\033[1;33m')
+    BLUE=$(printf '\033[1;34m')
+    MAGENTA=$(printf '\033[1;35m')
+    CYAN=$(printf '\033[1;36m')
+    WHITE=$(printf '\033[1;37m')
+    NC=$(printf '\033[0m')
+fi
 
-# ==========================================
-# 0. 环境与包管理器检测
-# ==========================================
-OS_TYPE=$(uname -o 2>/dev/null || uname -s)
+# Logging Tools (With Icons)
+log_info()    { printf "${BLUE} ℹ️ [INFO]${NC} %s\n" "$1"; }
+log_success() { printf "${GREEN} ✅ [PASS]${NC} %s\n" "$1"; }
+log_warn()    { printf "${YELLOW} ⚠️ [WARN]${NC} %s\n" "$1"; }
+log_error()   { printf "${RED} 🛑 [FAIL]${NC} %s\n" "$1"; }
+
+# Step Divider
+print_step() {
+    echo ""
+    printf "${CYAN}┌──────────────────────────────────────────────────────────────┐${NC}\n"
+    printf "${CYAN}│ 🚀 STEP %d/%d : %-43s │${NC}\n" "$1" "$2" "$3"
+    printf "${CYAN}└──────────────────────────────────────────────────────────────┘${NC}\n"
+}
+
+# Variable Initialization
+OS_TYPE=""
 INSTALL_CMD=""
 UPDATE_CMD=""
 SUDO=""
-# 默认安装包列表 (Linux/Android 通用)
-PACKAGES="zsh curl git lsd bat fzf"
+TARGET_DIR="$HOME/quick_shell"
+TOTAL_STEPS=5
 
-detect_pm_linux_mac() {
-    echo -e "${BLUE}检测到 Linux/Mac 环境，请选择包管理器：${NC}"
-    echo "1) pkg (Termux)"
-    echo "2) apt (Debian/Ubuntu/Kali)"
-    echo "3) pacman (Arch/Manjaro)"
-    echo "4) brew (macOS/Linux)"
-    echo "5) dnf/yum (Fedora/CentOS)"
-    read -p "请输入选项 [1-5]: " pm_choice
-    case $pm_choice in
-        1) INSTALL_CMD="pkg install -y"; UPDATE_CMD="pkg update -y";;
-        2) INSTALL_CMD="apt install -y"; UPDATE_CMD="apt update -y"; SUDO="sudo";;
-        3) INSTALL_CMD="pacman -S --noconfirm"; UPDATE_CMD="pacman -Sy"; SUDO="sudo";;
-        4) INSTALL_CMD="brew install"; UPDATE_CMD="brew update";;
-        5) INSTALL_CMD="dnf install -y"; UPDATE_CMD="dnf update -y"; SUDO="sudo";;
-        *) echo "无效，默认 apt"; INSTALL_CMD="apt install -y"; UPDATE_CMD="apt update -y"; SUDO="sudo";;
+# Default Packages
+PACKAGES_COMMON="zsh curl git"
+# Extended Packages (lsd, bat, fzf)
+PACKAGES_EXT="lsd bat fzf"
+
+# --- 2. Environment Detection ---
+
+detect_env() {
+    print_step 1 $TOTAL_STEPS "Environment & Package Manager Check"
+    
+    # Get Kernel Info (Lower case)
+    OS_UNAME=$(uname -a | tr '[:upper:]' '[:lower:]')
+    
+    case "$OS_UNAME" in
+        *android*)
+            OS_TYPE="Android"
+            INSTALL_CMD="pkg install -y"
+            UPDATE_CMD="pkg update -y"
+            if [ -d "/sdcard" ]; then
+                TARGET_DIR="/sdcard/0.file/shell"
+            fi
+            ;;
+            
+        *msys*|*mingw*|*cygwin*)
+            OS_TYPE="Windows"
+            TARGET_DIR="$HOME/quick_shell"
+            
+            # Check pacman
+            if command -v pacman > /dev/null 2>&1; then
+                log_success "Detected MSYS2/Git Bash (Pacman available)."
+                INSTALL_CMD="pacman -S --noconfirm"
+                UPDATE_CMD="pacman -Sy"
+                # Windows specific packages
+                PACKAGES_EXT="mingw-w64-x86_64-lsd mingw-w64-x86_64-bat mingw-w64-x86_64-fzf"
+            else
+                log_error "Pacman package manager not found!"
+                log_warn "This script relies on MSYS2 environment. Please ensure you are using full MSYS2 or Git Bash with Pacman."
+                log_info "Download: https://github.com/msys2/msys2-installer/releases"
+                exit 1
+            fi
+            ;;
+            
+        *darwin*)
+            OS_TYPE="MacOS"
+            INSTALL_CMD="brew install"
+            UPDATE_CMD="brew update"
+            ;;
+            
+        *)
+            OS_TYPE="Linux"
+            # Auto-detect Linux Distro
+            if command -v apt >/dev/null 2>&1; then
+                INSTALL_CMD="apt install -y"; UPDATE_CMD="apt update -y"; SUDO="sudo"
+            elif command -v pacman >/dev/null 2>&1; then
+                INSTALL_CMD="pacman -S --noconfirm"; UPDATE_CMD="pacman -Sy"; SUDO="sudo"
+            elif command -v dnf >/dev/null 2>&1; then
+                INSTALL_CMD="dnf install -y"; UPDATE_CMD="dnf update -y"; SUDO="sudo"
+            elif command -v yum >/dev/null 2>&1; then
+                INSTALL_CMD="yum install -y"; UPDATE_CMD="yum update -y"; SUDO="sudo"
+            else
+                # Fallback manual selection
+                log_warn "Package manager auto-detection failed. Please select manually:"
+                echo " 1. apt (Debian/Ubuntu/Kali)"
+                echo " 2. pacman (Arch/Manjaro)"
+                echo " 3. dnf/yum (Fedora/CentOS)"
+                read -p "Select [1-3]: " pm_choice
+                case $pm_choice in
+                    1) INSTALL_CMD="apt install -y"; UPDATE_CMD="apt update -y"; SUDO="sudo";;
+                    2) INSTALL_CMD="pacman -S --noconfirm"; UPDATE_CMD="pacman -Sy"; SUDO="sudo";;
+                    3) INSTALL_CMD="dnf install -y"; UPDATE_CMD="dnf update -y"; SUDO="sudo";;
+                    *) INSTALL_CMD="apt install -y"; UPDATE_CMD="apt update -y"; SUDO="sudo";;
+                esac
+            fi
+            ;;
     esac
+    
+    log_info "Platform Detected : ${MAGENTA}${OS_TYPE}${NC}"
+    log_info "Target Directory  : ${WHITE}${TARGET_DIR}${NC}"
 }
 
-detect_pm_windows() {
-    echo -e "${BLUE}检测到 Windows 环境 (MinGW/MSYS/Cygwin)...${NC}"
+# --- 3. Software Installation ---
+
+install_pkgs() {
+    print_step 2 $TOTAL_STEPS "Core Software Installation"
     
-    # 检查 pacman 是否存在
-    if command -v pacman > /dev/null 2>&1; then
-        echo -e "${GREEN}-> 检测到 MSYS2 (pacman)，准备安装...${NC}"
-        INSTALL_CMD="pacman -S --noconfirm"
-        UPDATE_CMD="pacman -Sy"
-        
-        # --- 核心修改：Windows 下使用带前缀的包名 ---
-        # zsh, curl, git 通常在 msys 仓库，无需前缀
-        # lsd, bat, fzf 在 mingw64 仓库，需要前缀
-        PACKAGES="zsh curl git mingw-w64-x86_64-lsd mingw-w64-x86_64-bat mingw-w64-x86_64-fzf"
-        
-    else
-        echo -e "${RED}错误：未检测到 pacman 包管理器！${NC}"
-        echo -e "${YELLOW}Windows 环境下本脚本依赖 MSYS2 环境。${NC}"
-        echo -e "请前往以下地址下载并安装 MSYS2："
-        echo -e "${BLUE}https://github.com/msys2/msys2-installer/releases${NC}"
-        echo -e "注意：安装后请将 MSYS2 的 bin 目录添加到系统环境变量 PATH 中。"
-        echo -e "${RED}脚本已退出。${NC}"
+    log_info "Updating package repositories..."
+    # Suppress output, show error if failed
+    if ! eval "$SUDO $UPDATE_CMD" > /dev/null 2>&1; then
+        log_warn "Repository update returned warnings. Attempting to proceed..."
+    fi
+
+    log_info "Installing packages: ${WHITE}$PACKAGES_COMMON $PACKAGES_EXT${NC}"
+    # Windows pacman might take time
+    eval "$SUDO $INSTALL_CMD $PACKAGES_COMMON $PACKAGES_EXT"
+    
+    # Refresh hash
+    hash -r 2>/dev/null
+
+    # Verify Zsh
+    if ! command -v zsh > /dev/null 2>&1; then
+        log_error "Zsh installation failed! Please check network or source config."
         exit 1
     fi
+
+    # Linux: batcat -> bat mapping
+    if [ "$OS_TYPE" = "Linux" ]; then
+        if command -v batcat > /dev/null 2>&1 && ! command -v bat > /dev/null 2>&1; then
+            log_info "Creating symlink: batcat -> bat"
+            mkdir -p "$HOME/.local/bin"
+            ln -s "$(command -v batcat)" "$HOME/.local/bin/bat"
+            export PATH="$HOME/.local/bin:$PATH"
+        fi
+    fi
+    
+    log_success "Core dependencies installed successfully."
 }
 
-# --- 开始 OS 检测 ---
-case "$OS_TYPE" in
-    *Android*)
-        echo -e "${GREEN}-> 检测到 Android 系统 (Termux)${NC}"
-        INSTALL_CMD="pkg install -y"
-        UPDATE_CMD="pkg update -y"
-        # Termux 下包名是标准的
-        PACKAGES="zsh curl git lsd bat fzf"
-        ;;
-    *Msys*|*Cygwin*|*Mingw*|*Windows*)
-        detect_pm_windows
-        ;;
-    *)
-        detect_pm_linux_mac
-        ;;
-esac
+# --- 4. Configuration Generation (.zshrc) ---
 
-# ==========================================
-# 1. 安装基础软件
-# ==========================================
-echo -e "${GREEN}-> 正在更新源并安装必要软件...${NC}"
-echo -e "安装列表: ${BLUE}$PACKAGES${NC}"
+config_zshrc() {
+    print_step 3 $TOTAL_STEPS "Configuration Setup"
 
-# 执行更新
-eval "$SUDO $UPDATE_CMD"
+    printf "${WHITE}Please select an installation mode:${NC}\n"
+    printf "  ${CYAN}[1]${NC} Clean Install   ${DIM}(Removes old config, Recommended)${NC}\n"
+    printf "  ${CYAN}[2]${NC} Update Only     ${DIM}(Keeps config, Updates plugins)${NC}\n"
+    printf "  ${CYAN}[3]${NC} Force Reinstall Plugins ${DIM}(Keeps config, Re-clones plugins)${NC}\n"
+    read -p "Enter Selection [1-3]: " choice
 
-# 执行安装
-# 使用 $PACKAGES 变量替代硬编码
-eval "$SUDO $INSTALL_CMD $PACKAGES"
+    CLEAN_INSTALL=false
+    FORCE_RECLONE=false
 
-# --- 刷新命令缓存 ---
-hash -r 2>/dev/null
+    case "$choice" in
+        1) CLEAN_INSTALL=true ;;
+        2) FORCE_RECLONE=false ;;
+        3) FORCE_RECLONE=true ;;
+        *) log_warn "Invalid input. Defaulting to Update Only.";;
+    esac
 
-# 特殊处理：Ubuntu 下 bat 可能叫 batcat (仅 Linux 需要检测)
-if [[ "$OS_TYPE" != *"Msys"* ]] && [[ "$OS_TYPE" != *"Mingw"* ]]; then
-    if command -v batcat > /dev/null 2>&1 && ! command -v bat > /dev/null 2>&1; then
-        echo "检测到 batcat，创建 bat 别名目录..."
-        mkdir -p ~/.local/bin
-        ln -s $(which batcat) ~/.local/bin/bat
-        export PATH=$HOME/.local/bin:$PATH
-    fi
-fi
+    if [ "$CLEAN_INSTALL" = true ]; then
+        log_info "Cleaning up old configurations..."
+        rm -rf "$HOME/.zshrc" "$HOME/.oh-my-zsh"
+        
+        log_info "Creating Quick Shell directory..."
+        mkdir -p "$TARGET_DIR"
 
-# 检查 Zsh 是否安装成功
-if ! command -v zsh > /dev/null 2>&1; then
-    echo -e "${RED}错误：Zsh 安装失败！${NC}"
-    echo "调试信息: 尝试手动运行 'zsh --version' 查看是否安装成功。"
-    exit 1
-fi
-
-# ==========================================
-# 2. 用户交互菜单 (安装模式)
-# ==========================================
-echo -e "请选择安装模式："
-echo -e "${GREEN}1)${NC} ${RED}全新安装${NC} (删除旧配置)"
-echo -e "${GREEN}2)${NC} ${BLUE}保留配置，仅更新${NC}"
-echo -e "${GREEN}3)${NC} ${YELLOW}保留配置，强制重装插件${NC}"
-read -p "请输入选项 [1-3] (其他键退出): " choice
-
-CLEAN_INSTALL=false
-FORCE_RECLONE=false
-SKIP_ZSHRC=false
-
-case "$choice" in
-    1) CLEAN_INSTALL=true ;;
-    2) SKIP_ZSHRC=true; FORCE_RECLONE=false ;;
-    3) SKIP_ZSHRC=true; FORCE_RECLONE=true ;;
-    *) exit 1 ;;
-esac
-
-# ==========================================
-# 3. 处理配置文件 (.zshrc)
-# ==========================================
-# 定义 Quick Shell 目录，适配非 Android 环境
-if [[ "$OS_TYPE" == *"Android"* ]]; then
-    TARGET_DIR="/sdcard/0.file/shell"
-else
-    TARGET_DIR="$HOME/quick_shell"
-fi
-
-if [ "$CLEAN_INSTALL" = true ]; then
-    echo -e "${GREEN}-> 清理旧配置...${NC}"
-    rm -rf ~/.zshrc ~/.oh-my-zsh
-    
-    echo -e "${GREEN}-> 创建 Quick Shell 目录: ${TARGET_DIR}...${NC}"
-    mkdir -p "$TARGET_DIR"
-
-    echo -e "${GREEN}-> 生成 ~/.zshrc...${NC}"
-    cat > ~/.zshrc << EOF
+        log_info "Generating new ~/.zshrc ..."
+        cat > "$HOME/.zshrc" << EOF
+# Path to your oh-my-zsh installation.
 export ZSH="\$HOME/.oh-my-zsh"
+
+# Theme settings
 ZSH_THEME="powerlevel10k/powerlevel10k"
+
+# Plugins
 plugins=(git zsh-syntax-highlighting zsh-autosuggestions z extract fzf)
+
 source \$ZSH/oh-my-zsh.sh
 
-# 常用别名
+# --- Aliases ---
 alias ls=lsd
 alias ll='lsd -l'
 alias la='lsd -a'
+alias cat=bat
+alias catAll=bat --paging=never
 
-# Quick Shell 自动加载
+# --- Quick Shell Auto-Loader ---
 QS_DIR="${TARGET_DIR}"
 if [ -d "\$QS_DIR" ]; then
     for script in "\$QS_DIR"/*(N); do
@@ -172,53 +226,151 @@ if [ -d "\$QS_DIR" ]; then
             alias_name="\${filename%.*}"
             alias "\$alias_name"="bash '\$script'"
         fi
-    done
+    done    
 fi
 EOF
-else
-    echo -e "${BLUE}-> 跳过 .zshrc 生成。${NC}"
-fi
-
-# ==========================================
-# 4. 安装/更新 Oh My Zsh & 插件
-# ==========================================
-echo -e "${GREEN}-> 处理 Oh My Zsh...${NC}"
-export RUNZSH=no
-export KEEP_ZSHRC=yes
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
-
-ZSH_CUSTOM=${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}
-
-install_plugin() {
-    local url=$1
-    local path=$2
-    if [ -d "$path" ]; then
-        if [ "$FORCE_RECLONE" = true ] || [ "$CLEAN_INSTALL" = true ]; then
-            rm -rf "$path"
-            git clone --depth=1 "$url" "$path"
-        else
-            git -C "$path" pull || echo "更新失败"
-        fi
+        log_success ".zshrc generated successfully."
     else
-        git clone --depth=1 "$url" "$path"
+        log_info "Skipping .zshrc generation. Existing config preserved."
     fi
 }
 
-install_plugin "https://github.com/romkatv/powerlevel10k.git" "${ZSH_CUSTOM}/themes/powerlevel10k"
-install_plugin "https://github.com/zsh-users/zsh-syntax-highlighting" "${ZSH_CUSTOM}/plugins/zsh-syntax-highlighting"
-install_plugin "https://github.com/zsh-users/zsh-autosuggestions" "${ZSH_CUSTOM}/plugins/zsh-autosuggestions"
+# --- 5. Plugin Installation (OMZ & Plugins) ---
 
-# ==========================================
-# 5. 结尾
-# ==========================================
-echo -e "${GREEN}-> 设置默认 Shell...${NC}"
-if [[ "$OS_TYPE" == *"Android"* ]]; then
-    chsh -s zsh
-else
-    if which zsh > /dev/null 2>&1; then
-        chsh -s $(which zsh) || echo -e "${YELLOW}提示：可能需要手动输入密码或运行: chsh -s $(which zsh)${NC}"
+install_plugins() {
+    print_step 4 $TOTAL_STEPS "Plugin Deployment"
+
+    # Install Oh My Zsh Core
+    if [ ! -d "$HOME/.oh-my-zsh" ]; then
+        log_info "Installing Oh My Zsh Framework..."
+        export RUNZSH=no
+        export KEEP_ZSHRC=yes
+        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended > /dev/null
     fi
-fi
 
-echo -e "${GREEN}安装完成！Quick Shell 目录: ${TARGET_DIR}${NC}"
-exec zsh -l
+    ZSH_CUSTOM=${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}
+
+    # Plugin Manager
+    manage_plugin() {
+        local name=$1
+        local url=$2
+        local path=$3
+
+        if [ -d "$path" ]; then
+            if [ "$FORCE_RECLONE" = true ] || [ "$CLEAN_INSTALL" = true ]; then
+                printf "  📦 %-25s : ${YELLOW}Reinstalling...${NC}\n" "$name"
+                rm -rf "$path"
+                git clone --depth=1 "$url" "$path" -q
+            else
+                printf "  📦 %-25s : ${BLUE}Updating...${NC}\n" "$name"
+                git -C "$path" pull -q >/dev/null 2>&1 || echo "    ❌ Update Failed (Check Network)"
+            fi
+        else
+            printf "  📦 %-25s : ${GREEN}Installing...${NC}\n" "$name"
+            git clone --depth=1 "$url" "$path" -q
+        fi
+    }
+
+    echo "Processing Plugin List..."
+    manage_plugin "Powerlevel10k" "https://github.com/romkatv/powerlevel10k.git" "${ZSH_CUSTOM}/themes/powerlevel10k"
+    manage_plugin "Syntax Highlighting" "https://github.com/zsh-users/zsh-syntax-highlighting" "${ZSH_CUSTOM}/plugins/zsh-syntax-highlighting"
+    manage_plugin "Auto Suggestions" "https://github.com/zsh-users/zsh-autosuggestions" "${ZSH_CUSTOM}/plugins/zsh-autosuggestions"
+    
+    log_success "All plugins deployed successfully."
+}
+
+# --- 6. Set Default Shell ---
+
+set_default_shell() {
+    print_step 5 $TOTAL_STEPS "Default Shell Configuration"
+
+    # Zsh Launch Code (For Windows .bashrc)
+    local ZSH_LAUNCH_CODE='
+# [QuickShell] Auto-launch Zsh
+if [ -t 1 ]; then
+    exec zsh
+fi
+'
+
+    if [ "$OS_TYPE" = "Windows" ]; then
+        # Windows Logic
+        local BASHRC="$HOME/.bashrc"
+        
+        log_warn "Windows Environment Detected: 'chsh' is unavailable."
+        log_info "Modifying .bashrc to auto-launch Zsh when Git Bash starts."
+        echo ""
+        printf "Target File: ${WHITE}%s${NC}\n" "$BASHRC"
+        printf "Please select configuration method:\n"
+        printf "  ${CYAN}[1]${NC} %-20s : %s\n" "Append (Recommended)" "Safe, preserves existing config."
+        printf "  ${CYAN}[2]${NC} %-20s : %s\n" "Overwrite" "Clears old config (Backups made)."
+        printf "  ${CYAN}[3]${NC} %-20s : %s\n" "Skip" "Manual configuration later."
+        
+        read -p "Enter Selection [1-3]: " win_choice
+
+        case $win_choice in
+            1)
+                log_info "Appending configuration..."
+                if grep -q "exec zsh" "$BASHRC" 2>/dev/null; then
+                    log_info "Configuration already exists. Skipping."
+                else
+                    echo "$ZSH_LAUNCH_CODE" >> "$BASHRC"
+                    log_success "Appended successfully! Zsh will start automatically next time."
+                fi
+                ;;
+            2)
+                log_warn "Overwriting configuration..."
+                cp "$BASHRC" "${BASHRC}.bak" 2>/dev/null && log_info "Backup created at .bashrc.bak"
+                echo "$ZSH_LAUNCH_CODE" > "$BASHRC"
+                log_success "Overwrite successful!"
+                ;;
+            3)
+                log_info "Auto-configuration skipped."
+                echo ""
+                printf "${YELLOW}Tip: For Windows issues, visit:\nhttps://gist.github.com/glenkusuma/7d7df65a89e485ec2f4690fdc88fffd6${NC}\n"
+                ;;
+            *) log_warn "Invalid input. Skipping.";;
+        esac
+
+    else
+        # Linux / Mac / Android Logic
+        if [ "$OS_TYPE" = "Android" ]; then
+            log_info "Termux environment detected. Switching shell..."
+            chsh -s zsh
+        else
+            log_info "Attempting to switch shell using 'chsh'..."
+            ZSH_PATH=$(command -v zsh 2>/dev/null)
+            if [ -n "$ZSH_PATH" ]; then
+                chsh -s "$ZSH_PATH" || log_warn "Auto-switch failed. Please run manually: chsh -s $ZSH_PATH"
+            else
+                log_error "Zsh path not found. Skipping default shell setup."
+            fi
+        fi
+    fi
+}
+
+# --- Main Entry Point ---
+
+main() {
+    # Clear screen
+    printf "${MAGENTA}====================================================${NC}\n"
+    printf "${MAGENTA}   ✨ Zsh + OMZ + QuickShell Setup Script ✨      ${NC}\n"
+    printf "${MAGENTA}====================================================${NC}\n"
+
+    detect_env
+    install_pkgs
+    config_zshrc
+    install_plugins
+    set_default_shell
+
+    echo ""
+    log_success "🎉 All tasks completed successfully!"
+    
+    if [ "$OS_TYPE" = "Windows" ]; then
+        log_info "Please restart your Git Bash terminal to apply changes."
+    else
+        log_info "Entering Zsh now..."
+        exec zsh -l
+    fi
+}
+
+main
