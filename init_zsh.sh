@@ -31,10 +31,10 @@ else
 fi
 
 # Logging Tools (With Icons)
-log_info()    { printf "${BLUE} ℹ️ [INFO]${NC} %s\n" "$1"; }
-log_success() { printf "${GREEN} ✅ [PASS]${NC} %s\n" "$1"; }
-log_warn()    { printf "${YELLOW} ⚠️ [WARN]${NC} %s\n" "$1"; }
-log_error()   { printf "${RED} 🛑 [FAIL]${NC} %s\n" "$1"; }
+log_info()    { printf "${BLUE} 🔵 [INFO]${NC} %s\n" "$1"; }
+log_success() { printf "${GREEN} 🟢 [PASS]${NC} %s\n" "$1"; }
+log_warn()    { printf "${YELLOW} 🟡 [WARN]${NC} %s\n" "$1"; }
+log_error()   { printf "${RED} 🔴 [FAIL]${NC} %s\n" "$1"; }
 
 # Step Divider
 print_step() {

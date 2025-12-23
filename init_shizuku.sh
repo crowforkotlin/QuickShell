@@ -1,137 +1,218 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
-# --- 变量定义 ---
-BASEDIR=$( dirname "${0}" )
-BIN=/data/data/com.termux/files/usr/bin
-HOME=/data/data/com.termux/files/home
-DEX="${BASEDIR}/rish_shizuku.dex"
+# ==============================================================================
+# Script Name: Shizuku + Rish + ADB Setup Script
+# Platform   : Android (Termux)
+# Description: Automates the deployment of Shizuku startup scripts and Rish shell.
+# ==============================================================================
 
-# 定义颜色 (可选)
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
+# --- 1. Global Config & Utility Functions ---
 
-# ==========================================
-# 0. 环境检查：确保 ADB 已安装且为最新
-# ==========================================
-echo -e "${YELLOW}正在检查 ADB 环境...${NC}"
+# Variable Definitions
+BASEDIR=$(dirname "${0}")
+BIN_DIR="/data/data/com.termux/files/usr/bin"
+HOME_DIR="/data/data/com.termux/files/home"
+SOURCE_DEX="${BASEDIR}/rish_shizuku.dex"
+TARGET_DEX="${HOME_DIR}/rish_shizuku.dex"
+TOTAL_STEPS=4
 
-# 无论是否安装，都执行安装/更新命令，确保版本最新
-# -y 参数用于自动确认，避免脚本暂停
-pkg update -y
-pkg install android-tools -y
-
-# 检查 adb 命令是否可用
-if ! command -v adb &> /dev/null; then
-    echo -e "${RED}错误：ADB (android-tools) 安装失败！${NC}"
-    echo "请检查网络连接或 Termux 软件源设置。"
-    exit 1
+# Color Definitions (Safe for Termux/Bash)
+if command -v tput >/dev/null 2>&1; then
+    RED=$(tput setaf 1; tput bold)
+    GREEN=$(tput setaf 2; tput bold)
+    YELLOW=$(tput setaf 3; tput bold)
+    BLUE=$(tput setaf 4; tput bold)
+    CYAN=$(tput setaf 6; tput bold)
+    WHITE=$(tput setaf 7; tput bold)
+    NC=$(tput sgr0)
 else
-    echo -e "${GREEN}ADB 已准备就绪。${NC}"
+    RED=$(printf '\033[1;31m')
+    GREEN=$(printf '\033[1;32m')
+    YELLOW=$(printf '\033[1;33m')
+    BLUE=$(printf '\033[1;34m')
+    CYAN=$(printf '\033[1;36m')
+    WHITE=$(printf '\033[1;37m')
+    NC=$(printf '\033[0m')
 fi
 
-# 检查 dex 文件是否存在
-if [ ! -f "${DEX}" ]; then
-  echo -e "${RED}错误：找不到 ${DEX} 文件！${NC}"
-  echo "请确认已从 Shizuku App 导出文件 (文件名为 rish_shizuku.dex) 并放在当前目录下。"
-  exit 1
-fi
+# Logging Tools
+log_info()    { printf "${BLUE} 🔵 [INFO]${NC} %s\n" "$1"; }
+log_success() { printf "${GREEN} 🟢 [PASS]${NC} %s\n" "$1"; }
+log_warn()    { printf "${YELLOW} 🟡 [WARN]${NC} %s\n" "$1"; }
+log_error()   { printf "${RED} 🔴 [FAIL]${NC} %s\n" "$1"; }
 
-# ==========================================
-# 1. 创建 Shizuku 启动脚本 (shizuku)
-# ==========================================
-echo -e "${GREEN}正在生成启动脚本...${NC}"
+# Step Divider
+print_step() {
+    echo ""
+    printf "${CYAN}┌──────────────────────────────────────────────────────────────┐${NC}\n"
+    printf "${CYAN}│ 🚀 STEP %d/%d : %-43s │${NC}\n" "$1" "$2" "$3"
+    printf "${CYAN}└──────────────────────────────────────────────────────────────┘${NC}\n"
+}
 
-tee "${BIN}/shizuku" > /dev/null << EOF
+# --- 2. Environment Check ---
+
+check_env() {
+    print_step 1 $TOTAL_STEPS "Environment & Dependency Check"
+
+    log_info "Verifying 'rish_shizuku.dex' file..."
+    if [ ! -f "${SOURCE_DEX}" ]; then
+        log_error "File not found: ${WHITE}${SOURCE_DEX}${NC}"
+        log_warn "Please export 'rish_shizuku.dex' from the Shizuku App and place it in this folder."
+        exit 1
+    fi
+    log_success "Dex file found."
+
+    log_info "Installing/Updating ADB (android-tools)..."
+    # -y to avoid prompts
+    pkg update -y > /dev/null 2>&1
+    if pkg install android-tools -y > /dev/null 2>&1; then
+        log_success "ADB installed successfully."
+    else
+        log_error "Failed to install android-tools. Check your internet connection."
+        exit 1
+    fi
+
+    # Verify command
+    if ! command -v adb > /dev/null 2>&1; then
+        log_error "ADB command not found in PATH."
+        exit 1
+    fi
+}
+
+# --- 3. Generate Startup Script (shizuku) ---
+
+gen_shizuku_script() {
+    print_step 2 $TOTAL_STEPS "Generating Service Launcher (shizuku)"
+
+    local TARGET_FILE="${BIN_DIR}/shizuku"
+    log_info "Creating script: ${WHITE}${TARGET_FILE}${NC}"
+
+    tee "${TARGET_FILE}" > /dev/null << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 
-# 获取用户输入的端口号
+# Port argument
 PORT=\$1
 
-# 检查是否输入了端口号
+# Validation
 if [ -z "\$PORT" ]; then
-    echo "错误：未提供端口号！"
-    echo "用法: shizuku <端口号>"
-    echo "提示：您可以先运行 'wf' 命令跳转设置查看端口。"
+    echo -e "\033[1;31m[ERROR]\033[0m Missing port number!"
+    echo "Usage: shizuku <PORT>"
+    echo "Tip: Run 'wf' first to check Wireless Debugging settings."
     exit 1
 fi
 
-# 绕过 /tmp 权限问题
-export TMPDIR=/data/data/com.termux/files/home/tmp
+# Fix /tmp permission issues in Termux
+export TMPDIR=${HOME_DIR}/tmp
 mkdir -p \$TMPDIR
 
-echo "正在尝试连接到 localhost:\${PORT} ..."
+echo "🔄 Attempting to connect to localhost:\${PORT} ..."
 
-# 尝试连接指定端口
+# Try to connect
 result=\$( adb connect "localhost:\${PORT}" )
 
-# 检查连接结果
+# Check result
 if [[ "\$result" =~ "connected" || "\$result" =~ "already" ]]; then
-    echo "ADB连接成功：\${result}"
+    echo -e "\033[1;32m[SUCCESS]\033[0m ADB Connected: \${result}"
     
-    # 尝试重新连接离线设备
-    adb reconnect offline
+    # Reconnect offline devices just in case
+    adb reconnect offline > /dev/null 2>&1
     
-    echo "正在设置 TCP 5555 模式..."
+    echo "⚙️ Setting TCP/IP to 5555..."
     adb tcpip 5555
-    adb connect localhost:5555
+    adb connect localhost:5555 > /dev/null 2>&1
 
-    # --- 启动 Shizuku 服务 ---
-    echo "正在发送 Shizuku 启动命令..."
+    # --- Start Shizuku Service ---
+    echo "🚀 Sending start command..."
     
-    # 注意：这里的路径是硬编码的，如果 Shizuku 更新导致路径变化，可能需要重新提取路径
+    # Note: This path is hardcoded. If Shizuku updates, this might need changing.
     adb -s localhost:5555 shell /data/app/~~5IFLghd3vFZ3-rrE9-6cZA==/moe.shizuku.privileged.api-9kEZhlx2wGLOjURUtgFdvw==/lib/arm64/libshizuku.so
 
-    echo "Shizuku 启动命令已发送。"
+    echo "✅ Start command sent."
     exit 0
 else
-    echo "错误：无法连接到 localhost:\${PORT}"
-    echo "ADB 返回信息: \${result}"
-    echo "请检查端口号是否已变更（无线调试端口每次开关都会变化）。"
+    echo -e "\033[1;31m[FAIL]\033[0m Could not connect to localhost:\${PORT}"
+    echo "ADB Output: \${result}"
+    echo "Tip: Wireless debugging port changes every time you toggle it."
     exit 1
 fi
 EOF
+    log_success "Launcher script created."
+}
 
-# ==========================================
-# 2. 创建快捷跳转脚本 (wf)
-# ==========================================
-tee "${BIN}/wf" > /dev/null << EOF
+# --- 4. Generate Shortcut Script (wf) ---
+
+gen_wf_script() {
+    print_step 3 $TOTAL_STEPS "Generating Settings Shortcut (wf)"
+    
+    local TARGET_FILE="${BIN_DIR}/wf"
+    log_info "Creating script: ${WHITE}${TARGET_FILE}${NC}"
+
+    tee "${TARGET_FILE}" > /dev/null << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 
-echo "正在打开无线调试设置..."
+echo "⚙️  Opening Wireless Debugging Settings..."
 am start -a android.settings.APPLICATION_DEVELOPMENT_SETTINGS \\
   --es ":settings:fragment_args_key" "toggle_adb_wireless" > /dev/null 2>&1
 
 if [ \$? -eq 0 ]; then
-    echo "已发送跳转请求。"
+    echo "✅ Request sent."
 else
-    echo "跳转失败，请手动前往开发者选项。"
+    echo "❌ Failed to open settings. Please open manually."
 fi
 EOF
+    log_success "Shortcut script created."
+}
 
-# ==========================================
-# 3. 创建 Rish Shell 启动脚本 (rish)
-# ==========================================
-dex="${HOME}/rish_shizuku.dex"
-tee "${BIN}/rish" > /dev/null << EOF
+# --- 5. Generate Rish Shell & Finalize ---
+
+finalize_setup() {
+    print_step 4 $TOTAL_STEPS "Deploying Rish & Finalizing"
+
+    # 1. Generate 'rish' script
+    local RISH_FILE="${BIN_DIR}/rish"
+    log_info "Generating wrapper: ${WHITE}${RISH_FILE}${NC}"
+    
+    tee "${RISH_FILE}" > /dev/null << EOF
 #!/data/data/com.termux/files/usr/bin/bash
 
 export RISH_APPLICATION_ID="com.termux"
 
-/system/bin/app_process -Djava.class.path="${dex}" /system/bin --nice-name=rish rikka.shizuku.shell.ShizukuShellLoader "\${@}"
+/system/bin/app_process -Djava.class.path="${TARGET_DEX}" /system/bin --nice-name=rish rikka.shizuku.shell.ShizukuShellLoader "\${@}"
 EOF
 
-# --- 权限设置与文件复制 ---
-# 给 shizuku, rish, wf 添加执行权限
-chmod +x "${BIN}/shizuku" "${BIN}/rish" "${BIN}/wf"
+    # 2. Deploy Dex File
+    log_info "Deploying Dex file to: ${WHITE}${TARGET_DEX}${NC}"
+    cp -f "${SOURCE_DEX}" "${TARGET_DEX}"
+    chmod -w "${TARGET_DEX}" # Read-only protection
 
-# 复制 dex 文件
-cp -f "${DEX}" "${dex}"
-chmod -w "${dex}"
+    # 3. Set Permissions
+    log_info "Setting executable permissions..."
+    chmod +x "${BIN_DIR}/shizuku" "${BIN_DIR}/rish" "${BIN_DIR}/wf"
 
-echo -e "${GREEN}--- 脚本安装完成！ ---${NC}"
-echo "使用流程："
-echo "1. 输入 wf       -> 跳转设置，开启无线调试，记住端口号（例如 41234）"
-echo "2. 输入 shizuku 41234 -> 启动服务"
-echo "3. 输入 rish     -> 进入 Shizuku Shell"
+    log_success "All scripts installed."
+}
+
+# --- Main Entry Point ---
+
+main() {
+    printf "${MAGENTA}====================================================${NC}\n"
+    printf "${MAGENTA}   ✨ Shizuku + Rish + ADB Deployment Tool ✨      ${NC}\n"
+    printf "${MAGENTA}====================================================${NC}\n"
+
+    check_env
+    gen_shizuku_script
+    gen_wf_script
+    finalize_setup
+
+    echo ""
+    log_success "🎉 Deployment Completed Successfully!"
+    echo ""
+    printf "${CYAN}Usage Guide:${NC}\n"
+    printf "  1. Type ${WHITE}wf${NC}            -> Go to Settings, enable Wireless Debugging.\n"
+    printf "                          (Remember the port, e.g., 41234)\n"
+    printf "  2. Type ${WHITE}shizuku <PORT>${NC} -> Connect ADB & Start Service.\n"
+    printf "                          (e.g., shizuku 41234)\n"
+    printf "  3. Type ${WHITE}rish${NC}          -> Enter Shizuku Root Shell.\n"
+}
+
+main
