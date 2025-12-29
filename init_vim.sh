@@ -1,107 +1,92 @@
 #!/bin/bash
 
-echo ">>> 开始部署 Vim 配置..."
+echo ">>> 开始部署兼容性最强的 Vim 配置 (Gruvbox 版)..."
 
-# 1. 下载 vim-plug (使用 -k 跳过 SSL 验证，防止国内网络报错)
-echo "1. 正在安装 vim-plug..."
-curl -fLo ~/.vim/autoload/plug.vim --create-dirs -k https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+# 1. 下载 vim-plug
+if [ ! -f ~/.vim/autoload/plug.vim ]; then
+    echo "1. 下载插件管理器..."
+    curl -fLo ~/.vim/autoload/plug.vim --create-dirs -k https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+fi
 
-# 2. 写入 .vimrc 配置
-echo "2. 正在生成 ~/.vimrc 配置文件..."
+# 2. 写入 .vimrc
+echo "2. 生成配置文件..."
 cat << 'EOF' > ~/.vimrc
 " ====================================================================
-" 1. 插件清单 (自动下载，无需手动放 colors 文件)
+" 0. 自动安装插件
 " ====================================================================
+if empty(glob('~/.vim/plugged'))
+  autocmd VimEnter * PlugInstall --sync | source $MYVIMRC
+endif
+
 call plug#begin('~/.vim/plugged')
-
-    " --- 主题：GitHub Dark (像素级还原 VSCode 风格) ---
-    Plug 'tomasiser/vim-code-dark'
-
-    " --- 底部状态栏美化 ---
+    " --- 换用 Gruvbox 主题 (兼容性最强，看着舒服) ---
+    Plug 'morhetz/gruvbox'
+    
+    " --- 状态栏 ---
     Plug 'vim-airline/vim-airline'
     Plug 'vim-airline/vim-airline-themes'
-
-    " --- 文件图标 (需安装 Nerd Font 字体) ---
-    Plug 'ryanoasis/vim-devicons'
-
-    " --- 功能增强 ---
-    Plug 'junegunn/fzf', { 'do': { -> fzf#install() } } " 模糊搜索核心
-    Plug 'junegunn/fzf.vim'                             " FZF 插件版
-    Plug 'preservim/nerdtree'                           " 左侧文件树
-    Plug 'psliwka/vim-smoothie'                         " 平滑滚动特效
-
-    " --- 核心高亮 (支持几百种语言) ---
+    
+    " --- 功能区 ---
+    Plug 'preservim/nerdtree'
+    Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
+    Plug 'junegunn/fzf.vim'
+    
+    " --- 语法高亮增强 ---
     Plug 'sheerun/vim-polyglot'
-
 call plug#end()
 
 " ====================================================================
-" 2. 核心设置
+" 核心显示设置 (关键修改)
 " ====================================================================
-" 基础
-set noerrorbells
-set novisualbell
 set nocompatible
-set number
 syntax on
-set cursorline              " 高亮当前行
-set wrap                    " 自动换行
-set scrolloff=5             " 滚动保留空间
-set termguicolors           " 开启真彩色 (对 GitHub Dark 很重要)
+filetype plugin indent on  " 必须开启，否则无法识别文件类型导致无颜色
+
+" 关掉 termguicolors，改用传统的 256 色模式
+" 这样可以保证在任何终端（Xshell/Putty/CMD）都有颜色
+set t_Co=256 
+
+set number
+set cursorline
+set wrap
 set encoding=utf-8
-set hidden
-
-" 缩进
-set tabstop=4
-set shiftwidth=4
-set expandtab
-set autoindent
-
-" 搜索体验
-set hlsearch
-set incsearch
-set ignorecase smartcase
-
-" 剪贴板 (Ctrl+C / Ctrl+X)
-vmap <C-c> "+y
-vmap <C-x> "+d
 
 " ====================================================================
-" 3. 主题设置 (直接调用插件，无需本地文件)
+" 主题设置
 " ====================================================================
 try
-    " 设置背景为暗色
     set background=dark
-    " 启用 GitHub Dark 主题
-    colorscheme codedark
     
-    " 让 airline 状态栏也匹配该主题
-    let g:airline_theme = 'codedark'
+    " 设置 Gruvbox 的对比度为硬朗模式，颜色更鲜艳
+    let g:gruvbox_contrast_dark = 'hard'
+    
+    " 加载主题
+    colorscheme gruvbox
+    let g:airline_theme = 'gruvbox'
 catch
-    " 防止插件还没下载时报错
+    " 即使插件还没好，也强制用内置主题兜底
+    colorscheme desert
 endtry
 
 " ====================================================================
-" 4. 快捷键 (现代化习惯)
+" 快捷键
 " ====================================================================
 let mapleader=" "
-
-" [Ctrl+f] 搜索文本 (类似 VSCode/浏览器)
 nnoremap <C-f> /
 inoremap <C-f> <Esc>/
-
-" [Ctrl+n] 打开/关闭左侧文件树
 nnoremap <C-n> :NERDTreeToggle<CR>
-
-" [Ctrl+p] 全局搜索文件 (FZF)
 nnoremap <C-p> :Files<CR>
+vmap <C-c> "+y
+vmap <C-x> "+d
+
 EOF
 
 echo "========================================================"
-echo "✅ 配置部署完成！(Setup Done)"
+echo "✅ 部署完成 (兼容版)"
 echo "--------------------------------------------------------"
-echo "请立即执行以下最后一步："
-echo "1. 在终端输入: vim"
-echo "2. 进入 vim 后，输入命令: :PlugInstall"
-echo "3. 等待所有插件显示 Done 后，重启 vim 即可生效。"
+echo "这个版本去掉了会导致颜色丢失的 '真彩色' 强制开关，"
+echo "并换用了对环境要求最低的 Gruvbox 主题。"
+echo ""
+echo "请输入: vim"
+echo "等待底部插件安装进度条走完 (Done)，颜色就会立刻出来。"
 echo "========================================================"
