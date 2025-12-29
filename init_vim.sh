@@ -1,15 +1,17 @@
 #!/bin/bash
 
-echo ">>> 开始部署兼容性最强的 Vim 配置 (Gruvbox 版)..."
+echo ">>> 开始部署全能型 Vim 配置 (Gruvbox + 智能文件识别)..."
 
 # 1. 下载 vim-plug
 if [ ! -f ~/.vim/autoload/plug.vim ]; then
     echo "1. 下载插件管理器..."
     curl -fLo ~/.vim/autoload/plug.vim --create-dirs -k https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+else
+    echo "1. 插件管理器已存在。"
 fi
 
 # 2. 写入 .vimrc
-echo "2. 生成配置文件..."
+echo "2. 生成配置文件 (已增加 KDL/Niri 支持)..."
 cat << 'EOF' > ~/.vimrc
 " ====================================================================
 " 0. 自动安装插件
@@ -19,57 +21,73 @@ if empty(glob('~/.vim/plugged'))
 endif
 
 call plug#begin('~/.vim/plugged')
-    " --- 换用 Gruvbox 主题 (兼容性最强，看着舒服) ---
+    " 兼容性最强的主题
     Plug 'morhetz/gruvbox'
-    
-    " --- 状态栏 ---
+    " 状态栏
     Plug 'vim-airline/vim-airline'
     Plug 'vim-airline/vim-airline-themes'
-    
-    " --- 功能区 ---
+    " 文件树
     Plug 'preservim/nerdtree'
+    " 模糊搜索
     Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
     Plug 'junegunn/fzf.vim'
     
-    " --- 语法高亮增强 ---
+    " 【核心】语法高亮包 (包含 KDL, Rust, Go, Python 等几百种语言)
     Plug 'sheerun/vim-polyglot'
 call plug#end()
 
 " ====================================================================
-" 核心显示设置 (关键修改)
+" 1. 核心显示设置
 " ====================================================================
 set nocompatible
 syntax on
-filetype plugin indent on  " 必须开启，否则无法识别文件类型导致无颜色
-
-" 关掉 termguicolors，改用传统的 256 色模式
-" 这样可以保证在任何终端（Xshell/Putty/CMD）都有颜色
-set t_Co=256 
-
+filetype plugin indent on  " 必须开启
+set t_Co=256               " 强制 256 色，修复颜色丢失
 set number
 set cursorline
 set wrap
 set encoding=utf-8
+set mouse=a                " 允许鼠标点击
 
 " ====================================================================
-" 主题设置
+" 2. 自定义文件类型识别 (这里解决你的无颜色问题)
+" ====================================================================
+augroup CustomFiletypes
+    autocmd!
+    
+    " --- Niri Window Manager (KDL 格式) ---
+    " 识别后缀为 .kdl 的文件
+    autocmd BufNewFile,BufRead *.kdl set filetype=kdl
+    " 识别位于 niri 目录下名为 config 的无后缀文件
+    autocmd BufNewFile,BufRead */niri/config set filetype=kdl
+
+    " --- 其他 Linux 桌面常用配置扩充 ---
+    " Waybar (通常是 JSON，但支持注释)
+    autocmd BufNewFile,BufRead config.jsonc,*/waybar/config set filetype=jsonc
+    " Rofi (语法类似 CSS)
+    autocmd BufNewFile,BufRead *.rasi set filetype=css
+    " Hyprland (自定义 Conf)
+    autocmd BufNewFile,BufRead hyprland.conf set filetype=hyprlang
+    " Tmux
+    autocmd BufNewFile,BufRead .tmux.conf set filetype=tmux
+    " Sway / I3
+    autocmd BufNewFile,BufRead */sway/config,*/i3/config set filetype=i3config
+augroup END
+
+" ====================================================================
+" 3. 主题设置
 " ====================================================================
 try
     set background=dark
-    
-    " 设置 Gruvbox 的对比度为硬朗模式，颜色更鲜艳
-    let g:gruvbox_contrast_dark = 'hard'
-    
-    " 加载主题
+    let g:gruvbox_contrast_dark = 'hard'  "以此获得更鲜明的对比度
     colorscheme gruvbox
     let g:airline_theme = 'gruvbox'
 catch
-    " 即使插件还没好，也强制用内置主题兜底
     colorscheme desert
 endtry
 
 " ====================================================================
-" 快捷键
+" 4. 快捷键
 " ====================================================================
 let mapleader=" "
 nnoremap <C-f> /
@@ -82,11 +100,9 @@ vmap <C-x> "+d
 EOF
 
 echo "========================================================"
-echo "✅ 部署完成 (兼容版)"
+echo "✅ 部署完成！"
 echo "--------------------------------------------------------"
-echo "这个版本去掉了会导致颜色丢失的 '真彩色' 强制开关，"
-echo "并换用了对环境要求最低的 Gruvbox 主题。"
-echo ""
-echo "请输入: vim"
-echo "等待底部插件安装进度条走完 (Done)，颜色就会立刻出来。"
+echo "已添加对以下文件的自动颜色支持："
+echo "1. Niri 配置 (*.kdl, niri/config)"
+echo "2. Waybar, Rofi, Sway 等常用 Linux 配置文件"
 echo "========================================================"
