@@ -97,6 +97,24 @@ nnoremap <C-p> :Files<CR>
 vmap <C-c> "+y
 vmap <C-x> "+d
 
+" --- 正常模式 (Normal Mode) ---
+" 向下移动一行
+nnoremap <A-Down> :m .+1<CR>==
+" 向上移动一行
+nnoremap <A-Up> :m .-2<CR>==
+
+" --- 插入模式 (Insert Mode) ---
+" 向下移动一行
+inoremap <A-Down> <Esc>:m .+1<CR>==gi
+" 向上移动一行
+inoremap <A-Up> <Esc>:m .-2<CR>==gi
+
+" --- 可视模式 (Visual Mode) ---
+" 选中的代码块向下移动
+vnoremap <A-Down> :m '>+1<CR>gv=gv
+" 选中的代码块向上移动
+vnoremap <A-Up> :m '<-2<CR>gv=gv
+
 EOF
 
 echo "========================================================"
