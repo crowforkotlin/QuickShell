@@ -87,56 +87,74 @@ fi
 if command -v starship >/dev/null 2>&1; then
   _starship_bin="$(command -v starship)"
 
-  # Source init.zsh if available (functions/hooks), otherwise define manually
-  _starship_init="${_starship_bin:h}/init.zsh"
-  if [ -f "$_starship_init" ]; then
-    source "$_starship_init"
-  else
-    # --- Manual init (replaces starship init zsh, avoids quoted-path issues on Windows) ---
-    zmodload zsh/parameter
-    if [[ $ZSH_VERSION == ([1-4]*) ]]; then
-      __starship_get_time() { STARSHIP_CAPTURED_TIME=$("${_starship_bin}" time); }
+  # Starship's init code installs a zle-keymap-select widget.  Do it only
+  # once per zsh process; sourcing .zshrc again must not wrap that widget
+  # recursively.
+  if [[ -z ${__quick_shell_starship_initialized:-} ]]; then
+    # Source init.zsh if available (functions/hooks), otherwise define manually
+    _starship_init="${_starship_bin:h}/init.zsh"
+    if [ -f "$_starship_init" ]; then
+      source "$_starship_init"
     else
-      zmodload zsh/datetime zsh/mathfunc
-      __starship_get_time() { (( STARSHIP_CAPTURED_TIME = int(rint(EPOCHREALTIME * 1000)) )); }
-    fi
-    prompt_starship_precmd() {
-      STARSHIP_CMD_STATUS=$? STARSHIP_PIPE_STATUS=(${pipestatus[@]})
-      if (( ${+STARSHIP_START_TIME} )); then
-        __starship_get_time && STARSHIP_DURATION=$(( STARSHIP_CAPTURED_TIME - STARSHIP_START_TIME ))
-        unset STARSHIP_START_TIME
+      # --- Manual init (replaces starship init zsh, avoids quoted-path issues on Windows) ---
+      zmodload zsh/parameter
+      if [[ $ZSH_VERSION == ([1-4]*) ]]; then
+        __starship_get_time() { STARSHIP_CAPTURED_TIME=$("${_starship_bin}" time); }
       else
-        unset STARSHIP_DURATION STARSHIP_CMD_STATUS STARSHIP_PIPE_STATUS
+        zmodload zsh/datetime zsh/mathfunc
+        __starship_get_time() { (( STARSHIP_CAPTURED_TIME = int(rint(EPOCHREALTIME * 1000)) )); }
       fi
-      STARSHIP_JOBS_COUNT="${#jobstates[*]}"
-    }
-    prompt_starship_preexec() {
-      __starship_get_time && STARSHIP_START_TIME=$STARSHIP_CAPTURED_TIME
-    }
-    autoload -Uz add-zsh-hook
-    add-zsh-hook precmd prompt_starship_precmd
-    add-zsh-hook preexec prompt_starship_preexec
-    starship_zle-keymap-select() { zle reset-prompt; }
-    if [[ -v widgets[zle-keymap-select] ]]; then
-      __starship_preserved_zle_keymap_select=${widgets[zle-keymap-select]#user:}
-    fi
-    if [[ -z ${__starship_preserved_zle_keymap_select:-} ]]; then
-      zle -N zle-keymap-select starship_zle-keymap-select
-    else
-      starship_zle-keymap-select-wrapped() {
-        $__starship_preserved_zle_keymap_select "$@"
-        starship_zle-keymap-select "$@"
+      prompt_starship_precmd() {
+        STARSHIP_CMD_STATUS=$? STARSHIP_PIPE_STATUS=(${pipestatus[@]})
+        if (( ${+STARSHIP_START_TIME} )); then
+          __starship_get_time && STARSHIP_DURATION=$(( STARSHIP_CAPTURED_TIME - STARSHIP_START_TIME ))
+          unset STARSHIP_START_TIME
+        else
+          unset STARSHIP_DURATION STARSHIP_CMD_STATUS STARSHIP_PIPE_STATUS
+        fi
+        STARSHIP_JOBS_COUNT="${#jobstates[*]}"
       }
-      zle -N zle-keymap-select starship_zle-keymap-select-wrapped
+      prompt_starship_preexec() {
+        __starship_get_time && STARSHIP_START_TIME=$STARSHIP_CAPTURED_TIME
+      }
+      autoload -Uz add-zsh-hook
+      add-zsh-hook precmd prompt_starship_precmd
+      add-zsh-hook preexec prompt_starship_preexec
+
+      starship_zle-keymap-select() { zle reset-prompt; }
+      if [[ -v widgets[zle-keymap-select] ]]; then
+        __starship_preserved_zle_keymap_select=${widgets[zle-keymap-select]#user:}
+      else
+        __starship_preserved_zle_keymap_select=
+      fi
+
+      # Do not wrap Starship's own widget again. This also makes the manual
+      # fallback safe if an older shell already initialized Starship once.
+      case ${__starship_preserved_zle_keymap_select:-} in
+        ""|starship_zle-keymap-select)
+          zle -N zle-keymap-select starship_zle-keymap-select
+          ;;
+        starship_zle-keymap-select-wrapped)
+          ;;
+        *)
+          starship_zle-keymap-select-wrapped() {
+            "$__starship_preserved_zle_keymap_select" "$@"
+            starship_zle-keymap-select "$@"
+          }
+          zle -N zle-keymap-select starship_zle-keymap-select-wrapped
+          ;;
+      esac
+
+      export STARSHIP_SHELL="zsh"
+      STARSHIP_SESSION_KEY="$RANDOM$RANDOM$RANDOM$RANDOM$RANDOM"
+      STARSHIP_SESSION_KEY="${STARSHIP_SESSION_KEY}0000000000000000"
+      export STARSHIP_SESSION_KEY=${STARSHIP_SESSION_KEY:0:16}
+      VIRTUAL_ENV_DISABLE_PROMPT=1
+      # --- End manual init ---
     fi
-    export STARSHIP_SHELL="zsh"
-    STARSHIP_SESSION_KEY="$RANDOM$RANDOM$RANDOM$RANDOM$RANDOM"
-    STARSHIP_SESSION_KEY="${STARSHIP_SESSION_KEY}0000000000000000"
-    export STARSHIP_SESSION_KEY=${STARSHIP_SESSION_KEY:0:16}
-    VIRTUAL_ENV_DISABLE_PROMPT=1
-    # --- End manual init ---
+    unset _starship_init
+    __quick_shell_starship_initialized=1
   fi
-  unset _starship_init
 
   # PROMPT vars: use 'path' quoting inside $() — safe even when path contains spaces
   PROMPT="\$('${_starship_bin}' prompt --terminal-width=\"\$COLUMNS\" --keymap=\"\${KEYMAP:-}\" --status=\"\${STARSHIP_CMD_STATUS:-}\" --pipestatus=\"\${STARSHIP_PIPE_STATUS[*]:-}\" --cmd-duration=\"\${STARSHIP_DURATION:-}\" --jobs=\"\$STARSHIP_JOBS_COUNT\")"
