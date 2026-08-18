@@ -1,215 +1,104 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
-# ==============================================================================
-# Script Name: Screen Timeout Manager (Light) Installer
-# Platform   : Android (Termux)
-# Dependency : Shizuku (rish)
-# ==============================================================================
+set -Eeuo pipefail
 
-# --- 1. Global Config & Utility Functions ---
+readonly TERMUX_PREFIX_DEFAULT="/data/data/com.termux/files/usr"
+PREFIX="${PREFIX:-$TERMUX_PREFIX_DEFAULT}"
+BIN_DIR="${QUICK_SHELL_BIN_DIR:-$PREFIX/bin}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+COMMAND_SOURCE_DIR="${QUICK_SHELL_COMMAND_DIR:-$SCRIPT_DIR/termux-init/bin}"
 
-# Variable Definitions
-BIN_DIR="/data/data/com.termux/files/usr/bin"
-TARGET_FILE="${BIN_DIR}/light"
-TOTAL_STEPS=3
-
-# Color Definitions (Safe for Termux)
-if command -v tput >/dev/null 2>&1; then
-    RED=$(tput setaf 1; tput bold)
-    GREEN=$(tput setaf 2; tput bold)
-    YELLOW=$(tput setaf 3; tput bold)
-    BLUE=$(tput setaf 4; tput bold)
-    CYAN=$(tput setaf 6; tput bold)
-    WHITE=$(tput setaf 7; tput bold)
-    NC=$(tput sgr0)
-else
-    RED=$(printf '\033[1;31m')
-    GREEN=$(printf '\033[1;32m')
-    YELLOW=$(printf '\033[1;33m')
-    BLUE=$(printf '\033[1;34m')
-    CYAN=$(printf '\033[1;36m')
-    WHITE=$(printf '\033[1;37m')
-    NC=$(printf '\033[0m')
+if [[ ! -d "$COMMAND_SOURCE_DIR" ]]; then
+  COMMAND_SOURCE_DIR="$SCRIPT_DIR/bin"
+fi
+if [[ ! -d "$COMMAND_SOURCE_DIR" ]]; then
+  COMMAND_SOURCE_DIR="$SCRIPT_DIR/../termux-init/bin"
 fi
 
-# Logging Tools (Aligned & Colored)
-log_info()    { printf "${BLUE} 🔵 [INFO]${NC} %s\n" "$1"; }
-log_success() { printf "${GREEN} 🟢 [PASS]${NC} %s\n" "$1"; }
-log_warn()    { printf "${YELLOW} 🟡 [WARN]${NC} %s\n" "$1"; }
-log_error()   { printf "${RED} 🔴 [FAIL]${NC} %s\n" "$1"; }
-
-# Step Divider
-print_step() {
-    echo ""
-    printf "${CYAN}┌──────────────────────────────────────────────────────────────┐${NC}\n"
-    printf "${CYAN}│ 🚀 STEP %d/%d : %-43s │${NC}\n" "$1" "$2" "$3"
-    printf "${CYAN}└──────────────────────────────────────────────────────────────┘${NC}\n"
+info() {
+  printf '[info] %s\n' "$*"
 }
 
-# --- 2. Environment Check ---
-
-check_env() {
-    print_step 1 $TOTAL_STEPS "Environment Check"
-
-    log_info "Checking target directory..."
-    if [ ! -d "$BIN_DIR" ]; then
-        log_error "Target directory not found: $BIN_DIR"
-        exit 1
-    fi
-    log_success "Directory exists."
-
-    log_info "Checking for Shizuku (rish)..."
-    if ! command -v rish >/dev/null 2>&1; then
-        log_warn "Command 'rish' not found!"
-        log_info "The 'light' tool requires Shizuku to function."
-        log_info "You can proceed, but please ensure rish is installed later."
-    else
-        log_success "Shizuku (rish) is available."
-    fi
+fail() {
+  printf '[error] %s\n' "$*" >&2
+  exit 1
 }
 
-# --- 3. Generate Light Script ---
+usage() {
+  cat <<'USAGE'
+用法:
+  init_light.sh [选项]
 
-gen_light_script() {
-    print_step 2 $TOTAL_STEPS "Generating 'light' Utility"
-
-    log_info "Writing script to: ${WHITE}${TARGET_FILE}${NC}"
-
-    # Use quoted 'EOF' to prevent variable expansion during generation
-    tee "${TARGET_FILE}" > /dev/null << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
-
-# --- Internal Configuration ---
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-ARG=$1
-VAL=$2
-
-# --- Dependency Check ---
-if ! command -v rish &> /dev/null; then
-    echo -e "${RED} [ERROR] Command 'rish' not found.${NC}"
-    echo " Please install Shizuku/rish first."
-    exit 1
-fi
-
-# --- Help Menu ---
-if [ -z "$ARG" ]; then
-    echo -e "${BLUE}========================================${NC}"
-    echo -e "${BLUE}    Screen Timeout Manager (Light)      ${NC}"
-    echo -e "${BLUE}========================================${NC}"
-    echo -e "${YELLOW}Usage:${NC}"
-    echo -e "  light <min>      : Set timeout in minutes"
-    echo -e "  light s <sec>    : Set timeout in seconds"
-    echo -e "  light never      : Keep screen always on"
-    echo -e "  light check      : Show current settings"
-    echo ""
-    echo -e "${GREEN}Examples:${NC}"
-    echo "  light 5          (Screen off after 5 mins)"
-    echo "  light s 30       (Screen off after 30 secs)"
-    echo "  light never      (Never sleep)"
-    exit 0
-fi
-
-# --- Logic Processing ---
-TARGET_MS=0
-DISPLAY_TEXT=""
-
-if [ "$ARG" == "never" ]; then
-    # Max Integer value in Android ~24 days
-    TARGET_MS=2147483647
-    DISPLAY_TEXT="Never Sleep"
-
-elif [ "$ARG" == "check" ]; then
-    echo -e "${BLUE}Checking system settings...${NC}"
-    CURRENT=$(rish -c "settings get system screen_off_timeout" | tr -d '\r')
-    
-    if [ "$CURRENT" == "2147483647" ]; then
-        echo -e "Current Status: ${GREEN}Never Sleep${NC}"
-    elif [[ "$CURRENT" =~ ^[0-9]+$ ]]; then
-        SEC=$(($CURRENT / 1000))
-        if [ $SEC -ge 60 ]; then
-            MIN=$(($SEC / 60))
-            echo -e "Current Status: ${GREEN}${MIN} min${NC} (${CURRENT} ms)"
-        else
-            echo -e "Current Status: ${GREEN}${SEC} sec${NC} (${CURRENT} ms)"
-        fi
-    else
-        echo -e "${RED}Error: Could not retrieve settings.${NC}"
-    fi
-    exit 0
-
-elif [ "$ARG" == "s" ]; then
-    # Seconds Mode
-    if [[ ! "$VAL" =~ ^[0-9]+$ ]]; then
-        echo -e "${RED} [ERROR] Please provide valid seconds.${NC}"
-        exit 1
-    fi
-    TARGET_MS=$(($VAL * 1000))
-    DISPLAY_TEXT="${VAL} seconds"
-
-else
-    # Minutes Mode (Default)
-    if [[ ! "$ARG" =~ ^[0-9]+$ ]]; then
-        echo -e "${RED} [ERROR] Argument must be a number (min) or 'never'.${NC}"
-        exit 1
-    fi
-    TARGET_MS=$(($ARG * 60 * 1000))
-    DISPLAY_TEXT="${ARG} minutes"
-fi
-
-# --- Execution ---
-echo -e "Setting screen timeout to: ${YELLOW}${DISPLAY_TEXT}${NC} ..."
-rish -c "settings put system screen_off_timeout ${TARGET_MS}"
-
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN} [SUCCESS] Settings updated.${NC}"
-else
-    echo -e "${RED} [FAIL] Failed to update settings.${NC}"
-    echo " Check if Shizuku is running."
-fi
-EOF
-
-    log_success "Script content written."
+选项:
+  --uninstall   删除 light 命令
+  -h, --help    显示帮助
+USAGE
 }
 
-# --- 4. Finalize ---
+require_termux() {
+  case "$PREFIX" in
+    /data/data/*/files/usr|/data/user/*/*/files/usr) ;;
+    *) fail '此脚本必须在 Termux 中执行。' ;;
+  esac
 
-finalize() {
-    print_step 3 $TOTAL_STEPS "Finalizing Installation"
-
-    log_info "Setting executable permissions..."
-    chmod +x "${TARGET_FILE}"
-    
-    if [ -x "${TARGET_FILE}" ]; then
-        log_success "Permission granted."
-    else
-        log_error "Failed to set permissions."
-        exit 1
-    fi
+  [[ -d "$PREFIX/bin" && -x "$PREFIX/bin/bash" ]] \
+    || fail 'Termux 尚未完成初始化。'
+  [[ "$(id -u)" -ne 0 ]] \
+    || fail '请使用 Termux 普通用户执行，不能使用 root 用户。'
 }
 
-# --- Main Entry Point ---
+atomic_copy() {
+  local source_file="$1"
+  local target_file="$2"
+  local target_dir temp_file
+
+  target_dir="${target_file%/*}"
+  mkdir -p "$target_dir"
+  temp_file="$(mktemp "$target_dir/.quick-shell.XXXXXX")" \
+    || fail "无法创建临时文件: $target_file"
+
+  if ! cp "$source_file" "$temp_file"; then
+    rm -f "$temp_file"
+    fail "无法写入文件: $target_file"
+  fi
+  chmod 755 "$temp_file"
+  mv -f "$temp_file" "$target_file" \
+    || fail "无法安装文件: $target_file"
+}
 
 main() {
-    clear
-    printf "${BLUE}====================================================${NC}\n"
-    printf "${BLUE}   ✨ Screen Timeout Tool (Light) Installer ✨     ${NC}\n"
-    printf "${BLUE}====================================================${NC}\n"
+  case "${1:-}" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --uninstall)
+      require_termux
+      rm -f "$BIN_DIR/light"
+      info '已删除 light。'
+      exit 0
+      ;;
+    '')
+      ;;
+    *)
+      fail "未知选项: $1"
+      ;;
+  esac
 
-    check_env
-    gen_light_script
-    finalize
+  require_termux
+  command -v rish >/dev/null 2>&1 \
+    || fail '找不到 rish，请先执行 init_shizuku.sh。'
 
-    echo ""
-    log_success "🎉 Installation Complete!"
-    echo ""
-    printf "${CYAN}Try it now:${NC}\n"
-    printf "  Type ${WHITE}light${NC} to see the help menu.\n"
-    printf "  Type ${WHITE}light 10${NC} to set timeout to 10 minutes.\n"
+  source_file="$COMMAND_SOURCE_DIR/light"
+  [[ -f "$source_file" ]] || fail "找不到命令模板: $source_file"
+  atomic_copy "$source_file" "$BIN_DIR/light"
+  info 'light 安装完成。'
+  printf '%s\n' \
+    '用法:' \
+    '  light <分钟>' \
+    '  light seconds <秒>' \
+    '  light never' \
+    '  light status'
 }
 
-main
+main "$@"

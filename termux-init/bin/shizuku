@@ -1,0 +1,174 @@
+#!/system/bin/sh
+
+set -eu
+
+ADB_COMMAND=adb
+CONNECT_HOST=127.0.0.1
+TCP_PORT=5555
+SHIZUKU_PACKAGE=moe.shizuku.privileged.api
+
+fail() {
+  printf '[error] %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  printf '%s\n' \
+    '用法:' \
+    '  shizuku <无线调试端口>' \
+    '' \
+    '连接无线调试，切换 adb TCP 端口，然后启动 Shizuku。'
+}
+
+is_port() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$1" -ge 1 ] 2>/dev/null && [ "$1" -le 65535 ] 2>/dev/null
+}
+
+wait_for_device() {
+  serial=$1
+  attempt=0
+
+  while [ "$attempt" -lt 15 ]; do
+    if "$ADB_COMMAND" -s "$serial" get-state 2>/dev/null \
+      | tr -d '\r' | grep -qx device; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+
+  return 1
+}
+
+connect_tcp_device() {
+  serial=$1
+  attempt=0
+
+  while [ "$attempt" -lt 10 ]; do
+    "$ADB_COMMAND" connect "$serial" >/dev/null 2>&1 || true
+    if "$ADB_COMMAND" -s "$serial" get-state 2>/dev/null \
+      | tr -d '\r' | grep -qx device; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+
+  return 1
+}
+
+package_path() {
+  "$ADB_COMMAND" -s "$1" shell pm path "$SHIZUKU_PACKAGE" 2>/dev/null \
+    | tr -d '\r' \
+    | awk -F: '
+      /^package:/ {
+        path = $2
+        if (first == "") first = path
+        if (path ~ /\/base\.apk$/ && base == "") base = path
+      }
+      END {
+        if (base != "") print base
+        else if (first != "") print first
+      }'
+}
+
+native_library_path() {
+  "$ADB_COMMAND" -s "$1" shell dumpsys package "$SHIZUKU_PACKAGE" 2>/dev/null \
+    | tr -d '\r' \
+    | sed -n 's/.*nativeLibraryDir=\([^[:space:]]*\).*/\1/p' \
+    | head -n 1
+}
+
+server_running() {
+  serial=$1
+
+  if "$ADB_COMMAND" -s "$serial" shell pidof shizuku_server 2>/dev/null \
+    | tr -d '\r' | grep -q '[0-9]'; then
+    return 0
+  fi
+
+  "$ADB_COMMAND" -s "$serial" shell ps -A 2>/dev/null \
+    | tr -d '\r' | grep -q '[s]hizuku_server'
+}
+
+[ "$#" -eq 1 ] || { usage >&2; exit 2; }
+case "$1" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+command -v "$ADB_COMMAND" >/dev/null 2>&1 \
+  || fail '找不到 adb，请先安装 android-tools。'
+
+is_port "$1" || fail "无线调试端口号无效: $1"
+is_port "$TCP_PORT" || fail "TCP 端口号无效: $TCP_PORT"
+
+wireless_serial="$CONNECT_HOST:$1"
+target_serial="$CONNECT_HOST:$TCP_PORT"
+
+"$ADB_COMMAND" start-server >/dev/null 2>&1 \
+  || fail '无法启动 adb server。'
+"$ADB_COMMAND" connect "$wireless_serial" \
+  || fail "无法连接到 $wireless_serial。"
+wait_for_device "$wireless_serial" \
+  || fail "无线调试设备未进入可用状态: $wireless_serial"
+
+printf '[info] 切换 adb TCP 端口: %s\n' "$TCP_PORT"
+"$ADB_COMMAND" -s "$wireless_serial" tcpip "$TCP_PORT" \
+  || fail '无法切换 adb TCP 模式。'
+sleep 1
+connect_tcp_device "$target_serial" \
+  || fail "TCP 设备未进入可用状态: $target_serial"
+
+apk_path="$(package_path "$target_serial")"
+[ -n "$apk_path" ] \
+  || fail '找不到 Shizuku APK。请确认已安装 moe.shizuku.privileged.api。'
+
+library_dir="$(native_library_path "$target_serial")"
+starter=""
+if [ -n "$library_dir" ]; then
+  candidate="$library_dir/libshizuku.so"
+  if "$ADB_COMMAND" -s "$target_serial" shell "test -f '$candidate'" \
+    >/dev/null 2>&1; then
+    starter="$candidate"
+  fi
+fi
+
+if [ -z "$starter" ]; then
+  apk_dir="$(printf '%s\n' "$apk_path" | sed 's:/base\.apk$::')"
+  for abi in arm64 arm arm64-v8a armeabi-v7a x86_64 x86; do
+    candidate="$apk_dir/lib/$abi/libshizuku.so"
+    if "$ADB_COMMAND" -s "$target_serial" shell "test -f '$candidate'" \
+      >/dev/null 2>&1; then
+      starter="$candidate"
+      break
+    fi
+  done
+fi
+
+[ -n "$starter" ] || fail '找不到 Shizuku 启动程序 libshizuku.so。'
+
+printf '[info] 启动 Shizuku。\n'
+if ! "$ADB_COMMAND" -s "$target_serial" shell "$starter" "--apk=$apk_path"; then
+  printf '[warn] 新版启动参数失败，尝试旧版启动参数。\n' >&2
+  "$ADB_COMMAND" -s "$target_serial" shell "$starter" start \
+    || fail 'Shizuku 启动失败。'
+fi
+
+attempt=0
+while [ "$attempt" -lt 10 ]; do
+  if server_running "$target_serial"; then
+    printf '[info] Shizuku 已启动，设备序列号: %s\n' "$target_serial"
+    printf '%s\n' '如需使用 rish，请先在 Shizuku 中授权 Termux。'
+    exit 0
+  fi
+  attempt=$((attempt + 1))
+  sleep 1
+done
+
+fail '未检测到 shizuku_server 进程。'

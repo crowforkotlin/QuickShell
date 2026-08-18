@@ -1,0 +1,80 @@
+#!/system/bin/sh
+
+set -eu
+
+ADB_COMMAND=adb
+CONNECT_HOST=127.0.0.1
+
+fail() {
+  printf '[error] %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  printf '%s\n' \
+    '用法:' \
+    '  adb-connect <无线调试端口>' \
+    '  adb-connect pair <配对端口> <配对码>' \
+    '  adb-connect status' \
+    '  adb-connect disconnect [端口]'
+}
+
+is_port() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$1" -ge 1 ] 2>/dev/null && [ "$1" -le 65535 ] 2>/dev/null
+}
+
+connect_port() {
+  port=$1
+  is_port "$port" || fail "端口号无效: $port"
+  serial="$CONNECT_HOST:$port"
+
+  "$ADB_COMMAND" start-server >/dev/null 2>&1 \
+    || fail '无法启动 adb server。'
+  "$ADB_COMMAND" connect "$serial" \
+    || fail "无法连接到 $serial。"
+  "$ADB_COMMAND" -s "$serial" wait-for-device >/dev/null 2>&1 \
+    || fail "设备未进入可用状态: $serial"
+  printf '[info] 已连接: %s\n' "$serial"
+}
+
+if [ "$#" -eq 0 ]; then
+  usage >&2
+  exit 2
+fi
+
+if [ "$1" = -h ] || [ "$1" = --help ]; then
+  usage
+  exit 0
+fi
+
+command -v "$ADB_COMMAND" >/dev/null 2>&1 \
+  || fail '找不到 adb，请先安装 android-tools。'
+
+case "$1" in
+  status)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    "$ADB_COMMAND" devices
+    ;;
+  pair)
+    [ "$#" -eq 3 ] || { usage >&2; exit 2; }
+    is_port "$2" || fail "配对端口号无效: $2"
+    "$ADB_COMMAND" pair "$CONNECT_HOST:$2" "$3"
+    ;;
+  disconnect)
+    [ "$#" -le 2 ] || { usage >&2; exit 2; }
+    if [ "$#" -eq 2 ]; then
+      port=$2
+    else
+      port=5555
+    fi
+    is_port "$port" || fail "端口号无效: $port"
+    "$ADB_COMMAND" disconnect "$CONNECT_HOST:$port"
+    ;;
+  *)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    connect_port "$1"
+    ;;
+esac

@@ -1,0 +1,127 @@
+#!/system/bin/sh
+
+set -eu
+
+RISH_COMMAND=rish
+MAX_TIMEOUT_MS=2147483647
+TIMEOUT_MS=0
+DISPLAY_VALUE=
+
+fail() {
+  printf '[error] %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  printf '%s\n' \
+    '用法:' \
+    '  light <分钟>' \
+    '  light seconds <秒>' \
+    '  light never' \
+    '  light status'
+}
+
+is_uint() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+normalize_uint() {
+  normalized="$(printf '%s\n' "$1" | sed 's/^0*//')"
+  if [ -z "$normalized" ]; then
+    normalized=0
+  fi
+  printf '%s\n' "$normalized"
+}
+
+set_seconds() {
+  seconds="$(normalize_uint "$1")"
+  if ! [ "$seconds" -le 2147483 ] 2>/dev/null; then
+    fail '秒数超出 Android screen_off_timeout 的范围。'
+  fi
+  TIMEOUT_MS=$((seconds * 1000))
+  DISPLAY_VALUE="$seconds 秒"
+}
+
+set_minutes() {
+  minutes="$(normalize_uint "$1")"
+  if ! [ "$minutes" -le 35791 ] 2>/dev/null; then
+    fail '分钟数超出 Android screen_off_timeout 的范围。'
+  fi
+  TIMEOUT_MS=$((minutes * 60000))
+  DISPLAY_VALUE="$minutes 分钟"
+}
+
+show_status() {
+  current="$("$RISH_COMMAND" -c 'settings get system screen_off_timeout' 2>/dev/null)" \
+    || fail '无法读取 screen_off_timeout。'
+  current="$(printf '%s\n' "$current" | tr -d '\r' | tail -n 1 | sed 's/[[:space:]]//g')"
+
+  case "$current" in
+    "$MAX_TIMEOUT_MS")
+      printf '%s\n' '当前屏幕超时: 永不'
+      ;;
+    ''|*[!0-9]*)
+      fail "读取到无效的超时值: $current"
+      ;;
+    *)
+      if [ "$current" -ge 60000 ]; then
+        printf '当前屏幕超时: %s 分钟 (%s ms)\n' \
+          "$((current / 60000))" "$current"
+      else
+        printf '当前屏幕超时: %s 秒 (%s ms)\n' \
+          "$((current / 1000))" "$current"
+      fi
+      ;;
+  esac
+}
+
+if [ "$#" -eq 0 ]; then
+  usage
+  exit 0
+fi
+
+case "$1" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+esac
+
+command -v "$RISH_COMMAND" >/dev/null 2>&1 \
+  || fail '找不到 rish，请先执行 init_shizuku.sh。'
+
+case "$1" in
+  status|check)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    show_status
+    exit 0
+    ;;
+  never)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    TIMEOUT_MS=$MAX_TIMEOUT_MS
+    DISPLAY_VALUE=永不
+    ;;
+  seconds|-s|s)
+    [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+    is_uint "$2" || fail '秒数必须是非负整数。'
+    set_seconds "$2"
+    ;;
+  minutes|-m)
+    [ "$#" -eq 2 ] || { usage >&2; exit 2; }
+    is_uint "$2" || fail '分钟数必须是非负整数。'
+    set_minutes "$2"
+    ;;
+  *)
+    [ "$#" -eq 1 ] || { usage >&2; exit 2; }
+    is_uint "$1" || fail '参数必须是分钟数、never 或 status。'
+    set_minutes "$1"
+    ;;
+esac
+
+printf '设置屏幕超时: %s\n' "$DISPLAY_VALUE"
+"$RISH_COMMAND" -c "settings put system screen_off_timeout $TIMEOUT_MS" \
+  || fail '设置屏幕超时失败。'
+printf '%s\n' '设置完成。'
