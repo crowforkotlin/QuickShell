@@ -6,6 +6,9 @@ readonly SCRIPT_NAME="$(basename "$0")"
 readonly TERMUX_PREFIX_DEFAULT="/data/data/com.termux/files/usr"
 readonly SHIZUKU_PACKAGE="moe.shizuku.privileged.api"
 readonly SHIZUKU_RELEASE_API="https://api.github.com/repos/RikkaApps/Shizuku/releases/latest"
+readonly SHIZUKU_RELEASE_PAGE="https://github.com/RikkaApps/Shizuku/releases/latest"
+readonly SHIZUKU_RELEASE_ASSETS="https://github.com/RikkaApps/Shizuku/releases/expanded_assets"
+readonly GITHUB_USER_AGENT="quick-shell/1.0"
 
 PREFIX="${PREFIX:-$TERMUX_PREFIX_DEFAULT}"
 BIN_DIR="${QUICK_SHELL_BIN_DIR:-$PREFIX/bin}"
@@ -220,22 +223,61 @@ installed_shizuku_apk() {
   printf '%s\n' "$path"
 }
 
+github_request() {
+  curl --fail --location --silent --show-error \
+    --connect-timeout 15 --max-time 60 \
+    --user-agent "$GITHUB_USER_AGENT" \
+    --header 'Accept: application/vnd.github+json' "$@"
+}
+
+release_apk_from_page() {
+  local release_url release_tag assets_html apk_url
+
+  release_url="$(github_request -o /dev/null -w '%{url_effective}' \
+    "$SHIZUKU_RELEASE_PAGE")" \
+    || return 1
+  release_tag="${release_url##*/}"
+  case "$release_tag" in
+    v[0-9]*) ;;
+    *) return 1 ;;
+  esac
+
+  assets_html="$(github_request \
+    "$SHIZUKU_RELEASE_ASSETS/$release_tag")" \
+    || return 1
+  apk_url="$(printf '%s\n' "$assets_html" \
+    | sed -n 's/.*href="\([^"[:space:]]*\.apk[^"[:space:]]*\)".*/\1/p' \
+    | head -n 1)"
+  [[ -n "$apk_url" ]] || return 1
+
+  case "$apk_url" in
+    https://*|http://*) printf '%s\n' "$apk_url" ;;
+    /*) printf 'https://github.com%s\n' "$apk_url" ;;
+    *) return 1 ;;
+  esac
+}
+
 download_latest_apk() {
   local release_json apk_url
 
   command_exists curl || fail '下载 Shizuku 需要 curl。'
   info '获取 Shizuku 最新版本信息。'
-  release_json="$(curl --fail --location --silent --show-error \
-    --connect-timeout 15 --max-time 60 "$SHIZUKU_RELEASE_API")" \
-    || fail '无法获取 Shizuku Release 信息。'
 
-  apk_url="$(printf '%s\n' "$release_json" | awk -F '"' \
-    '$2 == "browser_download_url" && $4 ~ /\.apk($|\?)/ { print $4; exit }')"
-  [[ -n "$apk_url" ]] || fail 'Shizuku Release 中没有找到 APK。'
+  release_json="$(github_request "$SHIZUKU_RELEASE_API" || true)"
+  apk_url="$(printf '%s\n' "$release_json" \
+    | sed -n 's#.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"[:space:]]*\.apk[^"[:space:]]*\)".*#\1#p' \
+    | head -n 1)"
+
+  if [[ -z "$apk_url" ]]; then
+    warn 'GitHub API 不可用，改用 Release 页面获取 APK。'
+    apk_url="$(release_apk_from_page || true)"
+  fi
+  [[ -n "$apk_url" ]] \
+    || fail '无法获取 Shizuku Release 信息。请检查网络，或使用 --apk 指定本地 APK。'
 
   info '下载 Shizuku APK。'
-  curl --fail --location --silent --show-error --retry 2 \
-    --connect-timeout 15 --max-time 180 -o "$TMP_DIR/shizuku.apk" "$apk_url" \
+  github_request --retry 2 --max-time 180 \
+    -o "$TMP_DIR/shizuku.apk" "$apk_url" \
     || fail '下载 Shizuku APK 失败。'
   [[ -s "$TMP_DIR/shizuku.apk" ]] || fail '下载的 Shizuku APK 为空。'
 }

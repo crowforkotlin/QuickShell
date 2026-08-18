@@ -126,11 +126,12 @@ light status
 
 `termux-init/init_termux.sh` 是 Termux 部署入口。它可以从 `adb shell` 环境通过 `run-as` 进入 Termux 用户，也可以直接在 Termux 内执行；随后复制脚本到 `$HOME/.local/share/quick-shell`，安装 `rish`、ADB 快捷命令和 `light`。
 
-`termux-init/termux.sh` 是独立的 Termux Shell 入口，用于从 `adb shell` 进入 Termux 用户环境:
+`termux-init/termux.sh` 是独立的 Termux Shell 入口，用于从 `adb shell` 进入 Termux 用户环境。无参数时优先进入 Zsh，未安装 Zsh 时回退到 Bash；使用 `--command` 可以执行指定命令:
 
 ```bash
 adb push termux-init/termux.sh /data/local/tmp/termux.sh
 adb shell sh /data/local/tmp/termux.sh
+adb shell "sh /data/local/tmp/termux.sh --command 'exec zsh -il'"
 ```
 
 Windows 主机可以执行 `termux-init/install_termux.bat`。该脚本与 Linux/macOS 部署器使用相同的 Termux 私有目录流程，不负责下载 Termux APK。
